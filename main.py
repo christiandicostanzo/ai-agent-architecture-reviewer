@@ -1,66 +1,97 @@
-from typing import Dict
-from langchain_core.runnables import RunnableLambda, RunnablePassthrough
-from langchain_openai import ChatOpenAI
-from agents.decision_reviewer_agent import DecisionReviewerAgent
-from agents.diagram_reviewer_agent import DiagramReviewerAgent
-from dotenv import load_dotenv
 import os
+import sys
+from dotenv import load_dotenv, dotenv_values
+from loguru import logger
+from agents.chain_agent_reviewer import ChainAgentReviewer
 
+# Load environment variables
 load_dotenv()
 
-def create_review_chain():
-    # Initialize Models
-    # Note: Diagram agent needs a vision model like gpt-4o
-    model_text = ChatOpenAI(model="gpt-3.5-turbo")
-    model_vision = ChatOpenAI(model="gpt-4o")
+config = dotenv_values(".env")
 
-    # Initialize Agents
-    decision_agent = DecisionReviewerAgent(model_text)
-    diagram_agent = DiagramReviewerAgent(model_vision)
+# Configure logging
+logger.remove()
+logger.add(sys.stderr, level="INFO")
 
-    # 1. Define Step for Decision Review
-    # Input: { "decision": ..., "context": ..., "image_path": ... }
-    def run_decision_review(inputs: Dict) -> str:
-        print(f"Running Decision Review for: {inputs['decision']}")
-        return decision_agent.review(inputs["decision"], inputs.get("context", ""))
+# Check for API Key
+if not config['OPENAI_API_KEY']:
+    logger.warning("OPENAI_API_KEY not found in environment variables. Please set it in .env file.")
 
-    # 2. Define Step for Diagram Review
-    # It needs the original decision AND the output from step 1 (feedback)
-    def run_diagram_review(inputs: Dict) -> str:
-        print("Running Diagram Review...")
-        image_path = inputs["image_path"]
-        decision = inputs["decision"]
-        feedback = inputs["decision_feedback"]
-        
-        return diagram_agent.review_diagram(image_path, decision, feedback)
-
-    # 3. Construct the Chain using LCEL
-    # We use RunnablePassthrough.assign to keep the original inputs and add the new 'decision_feedback'
+def review_architure(decision: str, context: str, image_path: str):
+     logger.info("Initializing Chain Agent Reviewer...")
+    try:
+        reviewer = ChainAgentReviewer(api_key=config['OPENAI_API_KEY'])
     
-    chain = (
-        RunnablePassthrough.assign(
-            decision_feedback=RunnableLambda(run_decision_review)
-        )
-        | RunnableLambda(run_diagram_review)
-    )
+        print("\n--- AI Agent Architecture Reviewer ---")
+        print("This tool reviews an architectural decision against a diagram.")
+        
+        decision = input("\nEnter the proposed decision (e.g., 'Migrate to Microservices'): ")
+        if not decision: 
+            logger.info("No decision provided. Exiting.")
+            return
 
-    return chain
+        result = reviewer.run(decision=decision)
+
+        if img_input:
+            image_path = img_input
+            
+        if os.path.exists(image_path):
+            logger.info("Processing... This may take a moment.")
+            result = reviewer.run(decision=decision, context=context, image_path=image_path)
+            print("\nFinal Analysis:\n", result)
+        else:
+            logger.error(f"Image file '{image_path}' does not exist. Cannot proceed with Diagram Review.")
+
+    except Exception as e:
+        logger.exception(f"An error occurred: {e}")
+
+
+def review_architure_with_diagram():
+    logger.info("Initializing Chain Agent Reviewer...")
+    try:
+        reviewer = ChainAgentReviewer(api_key=config['OPENAI_API_KEY'])
+        
+        # Example Usage inputs
+        # Ensure you have a valid image path. 
+        # For demonstration, we'll check if a dummy path exists or ask the user to provide one.
+        image_path = "architecture.png" 
+        
+        if not os.path.exists(image_path):
+             logger.info(f"Note: '{image_path}' not found. Please ensure you have an image file if you want to test the full flow.")
+             # We can't really run the vision part without a real image, so we'll just print a message.
+             # But if the user provides one, it will work.
+        
+        # Using print for UI interaction is still cleaner than logging, or we can use input directly.
+        # But we will use log info for status updates.
+        print("\n--- AI Agent Architecture Reviewer ---")
+        print("This tool reviews an architectural decision against a diagram.")
+        
+        decision = input("\nEnter the proposed decision (e.g., 'Migrate to Microservices'): ")
+        if not decision: 
+            logger.info("No decision provided. Exiting.")
+            return
+
+        context = input("Enter context (optional): ")
+        
+        img_input = input(f"Enter path to architecture diagram image (default: {image_path}): ")
+
+        result = reviewer.run(decision=decision, context=context, image_path=image_path)
+
+        if img_input:
+            image_path = img_input
+            
+        if os.path.exists(image_path):
+            logger.info("Processing... This may take a moment.")
+            result = reviewer.run(decision=decision, context=context, image_path=image_path)
+            print("\nFinal Analysis:\n", result)
+        else:
+            logger.error(f"Image file '{image_path}' does not exist. Cannot proceed with Diagram Review.")
+
+    except Exception as e:
+        logger.exception(f"An error occurred: {e}")
+
+def main():
+    review_architure()
 
 if __name__ == "__main__":
-    # Test the chain
-    chain = create_review_chain()
-    
-    # Example Usage inputs
-    # Ensure you have a valid image path in 'architecture.png' or update the path
-    inputs = {
-        "decision": "We will replace the SQL Database with a NoSQL solution to improve scale.",
-        "context": "The current system makes heavy use of complex joins for reporting.",
-        "image_path": "architecture.png" 
-    }
-    
-    # Only run if image exists to avoid errors in this dry run
-    if os.path.exists(inputs["image_path"]):
-        result = chain.invoke(inputs)
-        print("\nFinal Analysis:\n", result)
-    else:
-        print(f"Please provide a valid image at {inputs['image_path']} to test.")
+    main()
